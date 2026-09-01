@@ -2,6 +2,10 @@ package com.ktcloud.travelplanner.place.service
 
 import com.ktcloud.travelplanner.global.exception.DomainException
 import com.ktcloud.travelplanner.global.exception.ErrorCode
+import com.ktcloud.travelplanner.maps.port.MapsTravelPort
+import com.ktcloud.travelplanner.maps.port.MapsTimelinePort
+import com.ktcloud.travelplanner.maps.port.MapsTravelReference
+import com.ktcloud.travelplanner.maps.port.MapsTimelineItem
 import com.ktcloud.travelplanner.membership.repository.TravelMemberRepository
 import com.ktcloud.travelplanner.place.dto.TravelMapPointResponse
 import com.ktcloud.travelplanner.place.dto.TravelMapPointsResponse
@@ -14,21 +18,27 @@ import java.util.UUID
 
 @Service
 class TravelMapPointService(
-        private val travelRepository: TravelRepository,
-        private val travelMemberRepository: TravelMemberRepository,
-        private val timelineItemRepository: TimelineItemRepository,
+        private val mapsTravelPort: MapsTravelPort,
+        private val mapsTimelinePort: MapsTimelinePort,
         private val placeLocationService: PlaceLocationService,
 ) {
+        constructor(
+                travelRepository: TravelRepository,
+                travelMemberRepository: TravelMemberRepository,
+                timelineItemRepository: TimelineItemRepository,
+                placeLocationService: PlaceLocationService,
+        ) : this(
+                LegacyMapsTravelPort(travelRepository, travelMemberRepository),
+                LegacyMapsTimelinePort(timelineItemRepository),
+                placeLocationService,
+        )
         @Transactional(readOnly = true)
         fun getMapPoints(
                 travelId: UUID,
                 requesterId: UUID,
                 dayNumber: Int,
         ): TravelMapPointsResponse {
-                val travel = travelRepository.findById(travelId)
-                        .orElseThrow(::MapPointTravelNotFoundException)
-
-                validateReadPermission(travel, requesterId)
+                val travel = mapsTravelPort.findReadableTravel(travelId, requesterId)
 
                 if (dayNumber !in 1..travel.travelDays) {
                         throw InvalidMapDayNumberException()
@@ -38,32 +48,31 @@ class TravelMapPointService(
                 val unmappedTimelineItemIds = mutableListOf<UUID>()
                 val unresolvedTimelineItemIds = mutableListOf<UUID>()
 
-                val timelineItems = timelineItemRepository
-                        .findAllByTravelIdOrderByDayNumberAscVisitOrderAsc(travelId)
-                        .filter { timelineItem ->
-                                timelineItem.dayNumber == dayNumber.toShort() ||
-                                        timelineItem.dayNumber == null
-                        }
+                val timelineItems = mapsTimelinePort.findMapItems(travelId, dayNumber)
 
                 timelineItems.forEach { timelineItem ->
                         val googlePlaceId = timelineItem.googlePlaceId
                                 ?.takeIf { it.isNotBlank() }
 
                         if (googlePlaceId == null) {
-                                unmappedTimelineItemIds += timelineItem.id
+                                unmappedTimelineItemIds += timelineItem.timelineItemId
                                 return@forEach
                         }
 
                         val location = placeLocationService.getLocation(googlePlaceId)
 
                         if (location == null) {
-                                unresolvedTimelineItemIds += timelineItem.id
+                                unresolvedTimelineItemIds += timelineItem.timelineItemId
                                 return@forEach
                         }
 
-                        points += TravelMapPointResponse.from(
-                                timelineItem,
-                                location,
+                        points += TravelMapPointResponse(
+                                timelineItemId = timelineItem.timelineItemId,
+                                visitOrder = timelineItem.visitOrder,
+                                name = timelineItem.name,
+                                googlePlaceId = googlePlaceId,
+                                latitude = location.latitude,
+                                longitude = location.longitude,
                         )
                 }
 
@@ -76,18 +85,28 @@ class TravelMapPointService(
                 )
         }
 
-        private fun validateReadPermission(
-                travel: Travel,
-                requesterId: UUID,
-        ) {
-                if (travel.owner.id == requesterId) {
-                        return
-                }
+}
 
-                if (travelMemberRepository.findAcceptedRole(travel.id, requesterId) == null) {
-                        throw MapPointAccessDeniedException()
-                }
+private class LegacyMapsTravelPort(
+        private val travelRepository: TravelRepository,
+        private val travelMemberRepository: TravelMemberRepository,
+) : MapsTravelPort {
+        override fun findReadableTravel(travelId: UUID, requesterId: UUID): MapsTravelReference {
+                val travel = travelRepository.findById(travelId).orElseThrow(::MapPointTravelNotFoundException)
+                if (travel.owner.id != requesterId &&
+                        travelMemberRepository.findAcceptedRole(travelId, requesterId) == null
+                ) throw MapPointAccessDeniedException()
+                return MapsTravelReference(travel.id, travel.travelDays)
         }
+}
+
+private class LegacyMapsTimelinePort(
+        private val repository: TimelineItemRepository,
+) : MapsTimelinePort {
+        override fun findMapItems(travelId: UUID, dayNumber: Int): List<MapsTimelineItem> =
+                repository.findAllByTravelIdOrderByDayNumberAscVisitOrderAsc(travelId)
+                        .filter { it.dayNumber == dayNumber.toShort() || it.dayNumber == null }
+                        .map { MapsTimelineItem(it.id, it.visitOrder.toInt(), it.name, it.googlePlaceId) }
 }
 
 class MapPointTravelNotFoundException :
