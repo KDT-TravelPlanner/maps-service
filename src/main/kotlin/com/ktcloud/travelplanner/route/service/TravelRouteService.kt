@@ -2,6 +2,7 @@ package com.ktcloud.travelplanner.route.service
 
 import com.ktcloud.travelplanner.global.exception.DomainException
 import com.ktcloud.travelplanner.global.exception.ErrorCode
+import com.ktcloud.travelplanner.maps.port.MapsRouteDataPort
 import com.ktcloud.travelplanner.membership.repository.TravelMemberRepository
 import com.ktcloud.travelplanner.route.dto.TravelRouteLegResponse
 import com.ktcloud.travelplanner.route.dto.TravelRoutePreviewRequest
@@ -14,17 +15,28 @@ import com.ktcloud.travelplanner.route.port.RouteCalculationWaypoint
 import com.ktcloud.travelplanner.timeline.repository.TimelineItemRepository
 import com.ktcloud.travelplanner.travel.model.Travel
 import com.ktcloud.travelplanner.travel.repository.TravelRepository
+import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.util.UUID
 
 @Service
 class TravelRouteService(
-    private val travelRepository: TravelRepository,
-    private val travelMemberRepository: TravelMemberRepository,
-    private val timelineItemRepository: TimelineItemRepository,
+    @Autowired
+    private val mapsRouteDataPort: MapsRouteDataPort,
     private val routeCalculationPort: RouteCalculationPort,
 ) {
+
+    /** 테스트와 기존 호출부 호환용 생성자. 운영 경로는 MapsRouteDataPort를 사용한다. */
+    constructor(
+        travelRepository: TravelRepository,
+        travelMemberRepository: TravelMemberRepository,
+        timelineItemRepository: TimelineItemRepository,
+        routeCalculationPort: RouteCalculationPort,
+    ) : this(
+        LegacyMapsRouteDataAdapter(travelRepository, travelMemberRepository, timelineItemRepository),
+        routeCalculationPort,
+    )
 
     /*
      * ======================================================
@@ -40,18 +52,7 @@ class TravelRouteService(
         transportationType: TransportationType,
     ): TravelRouteResponse {
         val travel =
-            travelRepository
-                .findById(
-                    travelId,
-                )
-                .orElseThrow(
-                    ::RouteTravelNotFoundException,
-                )
-
-        validateReadPermission(
-            travel,
-            requesterId,
-        )
+            mapsRouteDataPort.findReadableTravel(travelId, requesterId)
 
         validateDayNumber(
             travel,
@@ -59,11 +60,7 @@ class TravelRouteService(
         )
 
         val waypoints =
-            timelineItemRepository
-                .findAllByTravelIdAndDayNumberOrderByVisitOrderAsc(
-                    travelId,
-                    dayNumber.toShort(),
-                )
+            mapsRouteDataPort.findWaypoints(travelId, dayNumber)
                 .mapNotNull { timelineItem ->
                     timelineItem.googlePlaceId
                         ?.takeIf(
@@ -214,18 +211,7 @@ class TravelRouteService(
         request: TravelRoutePreviewRequest,
     ): TravelRoutePreviewResponse {
         val travel =
-            travelRepository
-                .findById(
-                    travelId,
-                )
-                .orElseThrow(
-                    ::RouteTravelNotFoundException,
-                )
-
-        validateReadPermission(
-            travel,
-            requesterId,
-        )
+            mapsRouteDataPort.findReadableTravel(travelId, requesterId)
 
         validateDayNumber(
             travel,
@@ -326,29 +312,6 @@ class TravelRouteService(
             warnings =
                 calculation.warnings,
         )
-    }
-
-    private fun validateReadPermission(
-        travel: Travel,
-        requesterId: UUID,
-    ) {
-        if (
-            travel.owner.id ==
-            requesterId
-        ) {
-            return
-        }
-
-        if (
-            travelMemberRepository
-                .findAcceptedRole(
-                    travel.id,
-                    requesterId,
-                ) ==
-            null
-        ) {
-            throw RouteAccessDeniedException()
-        }
     }
 
     private fun validateDayNumber(
@@ -454,6 +417,23 @@ class TravelRouteService(
         private const val MAX_ROUTE_WAYPOINTS =
             27
     }
+}
+
+private class LegacyMapsRouteDataAdapter(
+    private val travelRepository: TravelRepository,
+    private val travelMemberRepository: TravelMemberRepository,
+    private val timelineItemRepository: TimelineItemRepository,
+) : MapsRouteDataPort {
+    override fun findReadableTravel(travelId: UUID, requesterId: UUID): Travel {
+        val travel = travelRepository.findById(travelId).orElseThrow(::RouteTravelNotFoundException)
+        if (travel.owner.id != requesterId &&
+            travelMemberRepository.findAcceptedRole(travelId, requesterId) == null
+        ) throw RouteAccessDeniedException()
+        return travel
+    }
+
+    override fun findWaypoints(travelId: UUID, dayNumber: Int): List<com.ktcloud.travelplanner.timeline.model.TimelineItem> =
+        timelineItemRepository.findAllByTravelIdAndDayNumberOrderByVisitOrderAsc(travelId, dayNumber.toShort())
 }
 
 class RouteTravelNotFoundException :
