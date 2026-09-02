@@ -1,6 +1,5 @@
 package com.ktcloud.travelplanner.global.security
 
-import com.ktcloud.travelplanner.user.repository.UserRepository
 import jakarta.servlet.FilterChain
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
@@ -12,7 +11,6 @@ import org.springframework.web.filter.OncePerRequestFilter
 
 class JwtAuthenticationFilter(
 	private val jwtTokenService: JwtTokenService,
-	private val userRepository: UserRepository,
 	private val apiSecurityErrorHandler: ApiSecurityErrorHandler,
 ) : OncePerRequestFilter() {
 	override fun doFilterInternal(
@@ -29,10 +27,6 @@ class JwtAuthenticationFilter(
 		try {
 			val token = extractBearerToken(authorization)
 			val userId = jwtTokenService.parseUserId(token)
-			if (!userRepository.existsById(userId)) {
-				throw InvalidAccessTokenException()
-			}
-
 			val principal = AuthenticatedUserPrincipal(userId)
 			val authentication = UsernamePasswordAuthenticationToken.authenticated(
 				principal,
