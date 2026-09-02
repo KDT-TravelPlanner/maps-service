@@ -1,6 +1,5 @@
 package com.ktcloud.travelplanner.global.security
 
-import com.ktcloud.travelplanner.user.repository.UserRepository
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -22,10 +21,8 @@ class SecurityConfig(
 	@Bean
 	fun jwtAuthenticationFilter(
 		jwtTokenService: JwtTokenService,
-		userRepository: UserRepository,
 	): JwtAuthenticationFilter = JwtAuthenticationFilter(
 		jwtTokenService,
-		userRepository,
 		apiSecurityErrorHandler,
 	)
 
@@ -68,6 +65,7 @@ class SecurityConfig(
 						"/api/v1/community/posts/*/comments",
 					).permitAll()
 					.requestMatchers("/api/**").authenticated()
+					.requestMatchers("/internal/**").authenticated()
 					.anyRequest().permitAll()
 			}
 			.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter::class.java)
