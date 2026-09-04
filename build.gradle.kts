@@ -78,7 +78,16 @@ tasks.withType<Test> {
 }
 
 tasks.named<Test>("test") {
-	exclude("**/*IntegrationTest.class")
+	exclude("**/*IntegrationTest.class", "**/adapter/**")
+}
+
+val adapterTest by tasks.registering(Test::class) {
+	description = "Runs HTTP adapter tests."
+	group = "verification"
+	testClassesDirs = sourceSets["test"].output.classesDirs
+	classpath = sourceSets["test"].runtimeClasspath
+	include("**/adapter/**")
+	shouldRunAfter(tasks.named("test"))
 }
 
 val integrationTest by tasks.registering(Test::class) {
@@ -91,7 +100,7 @@ val integrationTest by tasks.registering(Test::class) {
 }
 
 tasks.named("check") {
-	dependsOn(integrationTest)
+	dependsOn(integrationTest, adapterTest)
 }
 
 tasks.bootJar {
