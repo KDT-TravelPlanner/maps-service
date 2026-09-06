@@ -5,11 +5,18 @@ spring:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/travel_diary_dev}
     username: ${SPRING_DATASOURCE_USERNAME:travel_diary}
     password: ${SPRING_DATASOURCE_PASSWORD:travel_diary_password}
+    hikari:
+      # 네이티브 쿼리는 hibernate.default_schema를 무시하므로 커넥션 레벨에서 search_path를 고정한다.
+      connection-init-sql: SET search_path TO location
   data:
     redis:
       host: ${SPRING_DATA_REDIS_HOST:localhost}
       port: ${SPRING_DATA_REDIS_PORT:6379}
       password: ${SPRING_DATA_REDIS_PASSWORD:travel_diary_redis_password}
+  flyway:
+    create-schemas: true
+    default-schema: location
+    schemas: location
   jpa:
     hibernate:
       ddl-auto: validate
@@ -19,6 +26,7 @@ spring:
       hibernate:
         format_sql: false
         use_sql_comments: false
+        default_schema: location
   lifecycle:
     timeout-per-shutdown-phase: 20s
   devtools:
@@ -83,7 +91,7 @@ app:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
   security:
     jwt:
-      issuer: ${JWT_ISSUER:travel-planner-backend}
+      issuer: ${JWT_ISSUER:identity-service}
       access-token-ttl: ${JWT_ACCESS_TOKEN_TTL:30m}
 
 logging:
