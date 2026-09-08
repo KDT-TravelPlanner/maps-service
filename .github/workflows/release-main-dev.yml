@@ -1,0 +1,27 @@
+name: Maps Main Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: maps-main-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify Maps Release Candidate
+    uses: ./.github/workflows/build.yml
+    secrets: inherit
+
+  publish:
+    name: Publish Maps Image to ECR
+    needs: verify
+    if: needs.verify.result == 'success'
+    uses: ./.github/workflows/publish-ecr.yml
+    secrets: inherit
